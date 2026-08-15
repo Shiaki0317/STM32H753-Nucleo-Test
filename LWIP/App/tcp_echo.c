@@ -18,7 +18,6 @@
 typedef struct
 {
   struct pbuf *pending;
-  u16_t pending_offset;
   u8_t close_pending;
 } TCP_EchoConnection_t;
 
@@ -143,7 +142,6 @@ static err_t TCP_Echo_Receive(void *arg, struct tcp_pcb *tpcb,
   else if (connection->pending == NULL)
   {
     connection->pending = p;
-    connection->pending_offset = 0U;
   }
   else
   {
@@ -203,8 +201,6 @@ static void TCP_Echo_Error(void *arg, err_t err)
 static err_t TCP_Echo_Flush(struct tcp_pcb *tpcb,
                             TCP_EchoConnection_t *connection)
 {
-  struct pbuf *segment;
-  u16_t segment_offset;
   u16_t write_length;
   u16_t send_space;
   u8_t output_pending = 0U;
@@ -218,22 +214,14 @@ static err_t TCP_Echo_Flush(struct tcp_pcb *tpcb,
       break;
     }
 
-    segment = pbuf_skip(connection->pending,
-                        connection->pending_offset,
-                        &segment_offset);
-    if ((segment == NULL) || (segment_offset >= segment->len))
-    {
-      return TCP_Echo_Abort(tpcb, connection);
-    }
-
-    write_length = (u16_t)(segment->len - segment_offset);
+    write_length = connection->pending->len;
     if (write_length > send_space)
     {
       write_length = send_space;
     }
 
     err = tcp_write(tpcb,
-                    (const u8_t *)segment->payload + segment_offset,
+                    connection->pending->payload,
                     write_length,
                     TCP_WRITE_FLAG_COPY);
     if (err == ERR_MEM)
@@ -245,17 +233,11 @@ static err_t TCP_Echo_Flush(struct tcp_pcb *tpcb,
       return TCP_Echo_Abort(tpcb, connection);
     }
 
-    connection->pending_offset =
-        (u16_t)(connection->pending_offset + write_length);
     tcp_recved(tpcb, write_length);
     output_pending = 1U;
 
-    if (connection->pending_offset == connection->pending->tot_len)
-    {
-      pbuf_free(connection->pending);
-      connection->pending = NULL;
-      connection->pending_offset = 0U;
-    }
+    /* Release each DMA-backed Rx pbuf as soon as its bytes are copied. */
+    connection->pending = pbuf_free_header(connection->pending, write_length);
   }
 
   if (output_pending != 0U)

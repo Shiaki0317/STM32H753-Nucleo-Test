@@ -458,6 +458,7 @@ void pbuf_free_custom(struct pbuf *p)
   if (RxAllocStatus == RX_ALLOC_ERROR)
   {
     RxAllocStatus = RX_ALLOC_OK;
+    RxDataAvailable = 1U;
   }
 }
 
