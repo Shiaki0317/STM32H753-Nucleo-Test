@@ -28,6 +28,7 @@
 #include "ethernetif.h"
 
 /* USER CODE BEGIN 0 */
+#include "tcp_echo.h"
 
 /* USER CODE END 0 */
 /* Private function prototypes -----------------------------------------------*/
@@ -97,6 +98,10 @@ void MX_LWIP_Init(void)
   netif_set_link_callback(&gnetif, ethernet_link_status_updated);
 
 /* USER CODE BEGIN 3 */
+  if (TCP_Echo_Init() != ERR_OK)
+  {
+    Error_Handler();
+  }
 
 /* USER CODE END 3 */
 }
