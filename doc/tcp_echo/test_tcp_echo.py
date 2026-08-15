@@ -15,15 +15,40 @@ DEFAULT_PORT = 7
 DEFAULT_SIZE = 4096
 DEFAULT_REPEAT = 3
 DEFAULT_TIMEOUT = 3.0
+DEFAULT_TOKEN = "stm32h753"
+AUTH_OK = b"OK\r\n"
+AUTH_FAILED = b"ERR authentication failed\r\n"
 
 
-def exchange(host: str, port: int, payload: bytes, timeout: float) -> bytes:
+def receive_exact(connection: socket.socket, length: int) -> bytes:
+    """Receive exactly length bytes or stop if the peer closes."""
+    received = bytearray()
+    while len(received) < length:
+        chunk = connection.recv(length - len(received))
+        if not chunk:
+            break
+        received.extend(chunk)
+    return bytes(received)
+
+
+def authenticate(connection: socket.socket, token: str) -> None:
+    """Authenticate one connection before starting the Echo exchange."""
+    connection.sendall(f"AUTH {token}\r\n".encode("utf-8"))
+    response = receive_exact(connection, len(AUTH_OK))
+    if response != AUTH_OK:
+        raise PermissionError(f"authentication rejected: {response!r}")
+
+
+def exchange(
+    host: str, port: int, token: str, payload: bytes, timeout: float
+) -> bytes:
     """Send and receive concurrently so TCP flow control cannot deadlock."""
     received = bytearray()
     sent_offset = 0
     write_closed = False
 
     with socket.create_connection((host, port), timeout=timeout) as connection:
+        authenticate(connection, token)
         connection.setblocking(False)
         deadline = time.monotonic() + timeout
 
@@ -89,11 +114,12 @@ def verify_case(
     label: str,
     host: str,
     port: int,
+    token: str,
     payload: bytes,
     timeout: float,
 ) -> None:
     """Execute one Echo exchange and fail if any byte differs."""
-    echoed = exchange(host, port, payload, timeout)
+    echoed = exchange(host, port, token, payload, timeout)
     matched = echoed == payload
     print(
         f"{label}: sent={len(payload)} received={len(echoed)} "
@@ -104,12 +130,58 @@ def verify_case(
         raise RuntimeError(f"{label}: echo mismatch ({first_difference(payload, echoed)})")
 
 
+def verify_rejected(host: str, port: int, timeout: float) -> None:
+    """Confirm that an invalid token is rejected and not echoed."""
+    with socket.create_connection((host, port), timeout=timeout) as connection:
+        connection.sendall(b"AUTH definitely-invalid-token\r\n")
+        response = receive_exact(connection, len(AUTH_FAILED))
+
+    matched = response == AUTH_FAILED
+    print(f"invalid-token: rejected={'yes' if matched else 'no'}")
+    if not matched:
+        raise RuntimeError(f"unexpected authentication response: {response!r}")
+
+
+def verify_auth_stream_handling(
+    host: str, port: int, token: str, timeout: float
+) -> None:
+    """Check split AUTH input and data following AUTH in the same TCP stream."""
+    payload = b"combined-auth-and-data\r\n"
+    auth_line = f"AUTH {token}\r\n".encode("utf-8")
+
+    with socket.create_connection((host, port), timeout=timeout) as connection:
+        split_at = max(1, len(auth_line) // 2)
+        connection.sendall(auth_line[:split_at])
+        time.sleep(0.05)
+        connection.sendall(auth_line[split_at:])
+        response = receive_exact(connection, len(AUTH_OK))
+        if response != AUTH_OK:
+            raise RuntimeError(f"split authentication failed: {response!r}")
+
+    with socket.create_connection((host, port), timeout=timeout) as connection:
+        connection.sendall(auth_line + payload)
+        response = receive_exact(connection, len(AUTH_OK) + len(payload))
+        expected = AUTH_OK + payload
+        if response != expected:
+            raise RuntimeError(
+                "combined authentication/data mismatch "
+                f"({first_difference(expected, response)})"
+            )
+
+    print("auth-stream: split=yes combined-data=yes")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Test an STM32/lwIP TCP Echo server."
     )
     parser.add_argument("--host", default=DEFAULT_HOST, help="server IPv4 address")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="TCP port")
+    parser.add_argument(
+        "--token",
+        default=DEFAULT_TOKEN,
+        help="pre-shared authentication token",
+    )
     parser.add_argument(
         "--size",
         type=int,
@@ -138,6 +210,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--repeat must be at least 1")
     if args.timeout <= 0:
         parser.error("--timeout must be greater than 0")
+    if "\r" in args.token or "\n" in args.token:
+        parser.error("--token must not contain CR or LF")
 
     return args
 
@@ -153,12 +227,17 @@ def main() -> int:
     )
 
     try:
-        verify_case("text", args.host, args.port, text_payload, args.timeout)
+        verify_rejected(args.host, args.port, args.timeout)
+        verify_auth_stream_handling(args.host, args.port, args.token, args.timeout)
+        verify_case(
+            "text", args.host, args.port, args.token, text_payload, args.timeout
+        )
         for attempt in range(1, args.repeat + 1):
             verify_case(
                 f"binary[{attempt}/{args.repeat}]",
                 args.host,
                 args.port,
+                args.token,
                 binary_payload,
                 args.timeout,
             )

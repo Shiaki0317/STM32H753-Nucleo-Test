@@ -28,6 +28,8 @@ TCP Echoは、クライアントから受信したデータを変更せず、そ
 | [tcp_echo_changes.md](./tcp_echo_changes.md) | 変更ファイル、処理構造、各callbackを変更した理由 |
 | [tcp_echo_procedure.md](./tcp_echo_procedure.md) | ビルド、書き込み、netcat、自動テスト、デバッグ手順 |
 | [test_tcp_echo.py](./test_tcp_echo.py) | PCからEcho応答を自動検証するテストコード |
+| [tcp_echo_authentication_changes.md](./tcp_echo_authentication_changes.md) | 認証protocol、source変更理由、security上の制限 |
+| [tcp_echo_authentication_test_procedure.md](./tcp_echo_authentication_test_procedure.md) | token設定、正常・異常・負荷確認手順 |
 
 ## 3. 実装情報
 
