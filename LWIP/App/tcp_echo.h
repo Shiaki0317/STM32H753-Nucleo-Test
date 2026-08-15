@@ -14,11 +14,11 @@ extern "C" {
 
 #include "lwip/err.h"
 
-/** Standard TCP Echo Protocol port (RFC 862). */
-#define TCP_ECHO_PORT 7U
+/** Development TLS Echo service port. */
+#define TCP_ECHO_PORT 4433U
 
 /**
-  * Development-only pre-shared token.
+  * Development-only application authentication token carried inside TLS.
   *
   * Override this macro from the compiler settings for each deployment. Because
   * the protocol is plain TCP, the token is not protected against sniffing.

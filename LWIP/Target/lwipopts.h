@@ -41,6 +41,8 @@
 /* Parameters set in STM32CubeMX LwIP Configuration GUI -*/
 /*----- WITH_RTOS disabled (Since FREERTOS is not set) -----*/
 #define WITH_RTOS 0
+/*----- WITH_MBEDTLS enabled (Since MBEDTLS and FREERTOS are set) -----*/
+#define WITH_MBEDTLS 1
 /*----- CHECKSUM_BY_HARDWARE enabled -----*/
 #define CHECKSUM_BY_HARDWARE 1
 /*-----------------------------------------------------------------------------*/
@@ -55,6 +57,8 @@
 #define SYS_LIGHTWEIGHT_PROT 0
 /*----- Value in opt.h for MEM_ALIGNMENT: 1 -----*/
 #define MEM_ALIGNMENT 4
+/*----- LwIP heap enlarged for TLS records and TCP segments -----*/
+#define MEM_SIZE (16 * 1024)
 /*----- Default Value for H7 devices: 0x30004000 -----*/
 #define LWIP_RAM_HEAP_POINTER 0x30004000
 /*----- Value supported for H7 devices: 1 -----*/
@@ -64,13 +68,16 @@
 /*----- Value in opt.h for LWIP_DNS_SECURE: (LWIP_DNS_SECURE_RAND_XID | LWIP_DNS_SECURE_NO_MULTIPLE_OUTSTANDING | LWIP_DNS_SECURE_RAND_SRC_PORT) -*/
 #define LWIP_DNS_SECURE 7
 /*----- Value in opt.h for TCP_SND_QUEUELEN: (4*TCP_SND_BUF + (TCP_MSS - 1))/TCP_MSS -----*/
-#define TCP_SND_QUEUELEN 9
+#define TCP_MSS 1460
+#define TCP_WND 5840
+#define TCP_SND_BUF 5840
+#define TCP_SND_QUEUELEN 16
 /*----- Value in opt.h for TCP_SNDLOWAT: LWIP_MIN(LWIP_MAX(((TCP_SND_BUF)/2), (2 * TCP_MSS) + 1), (TCP_SND_BUF) - 1) -*/
-#define TCP_SNDLOWAT 1071
+#define TCP_SNDLOWAT 2921
 /*----- Value in opt.h for TCP_SNDQUEUELOWAT: LWIP_MAX(TCP_SND_QUEUELEN)/2, 5) -*/
-#define TCP_SNDQUEUELOWAT 5
+#define TCP_SNDQUEUELOWAT 8
 /*----- Value in opt.h for TCP_WND_UPDATE_THRESHOLD: LWIP_MIN(TCP_WND/4, TCP_MSS*4) -----*/
-#define TCP_WND_UPDATE_THRESHOLD 536
+#define TCP_WND_UPDATE_THRESHOLD 1460
 /*----- Value in opt.h for LWIP_NETIF_LINK_CALLBACK: 0 -----*/
 #define LWIP_NETIF_LINK_CALLBACK 1
 /*----- Value in opt.h for LWIP_NETCONN: 1 -----*/

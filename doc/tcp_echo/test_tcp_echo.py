@@ -6,18 +6,36 @@ from __future__ import annotations
 import argparse
 import select
 import socket
+import ssl
 import sys
 import time
 
 
 DEFAULT_HOST = "192.168.2.10"
-DEFAULT_PORT = 7
+DEFAULT_PORT = 4433
 DEFAULT_SIZE = 4096
 DEFAULT_REPEAT = 3
 DEFAULT_TIMEOUT = 3.0
 DEFAULT_TOKEN = "stm32h753"
 AUTH_OK = b"OK\r\n"
 AUTH_FAILED = b"ERR authentication failed\r\n"
+
+
+def create_tls_connection(
+    host: str, port: int, timeout: float
+) -> ssl.SSLSocket:
+    """Open a TLS 1.2 connection to the development certificate server."""
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.maximum_version = ssl.TLSVersion.TLSv1_2
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    tcp_socket = socket.create_connection((host, port), timeout=timeout)
+    try:
+        return context.wrap_socket(tcp_socket, server_hostname=None)
+    except Exception:
+        tcp_socket.close()
+        raise
 
 
 def receive_exact(connection: socket.socket, length: int) -> bytes:
@@ -45,18 +63,13 @@ def exchange(
     """Send and receive concurrently so TCP flow control cannot deadlock."""
     received = bytearray()
     sent_offset = 0
-    write_closed = False
 
-    with socket.create_connection((host, port), timeout=timeout) as connection:
+    with create_tls_connection(host, port, timeout) as connection:
         authenticate(connection, token)
         connection.setblocking(False)
         deadline = time.monotonic() + timeout
 
         while (sent_offset < len(payload)) or (len(received) < len(payload)):
-            if (sent_offset == len(payload)) and not write_closed:
-                connection.shutdown(socket.SHUT_WR)
-                write_closed = True
-
             read_list = [connection] if len(received) < len(payload) else []
             write_list = [connection] if sent_offset < len(payload) else []
             remaining = deadline - time.monotonic()
@@ -72,24 +85,31 @@ def exchange(
             progressed = False
 
             if writable:
-                sent_length = connection.send(memoryview(payload)[sent_offset:])
-                if sent_length == 0:
-                    raise ConnectionError("connection closed while sending")
-                sent_offset += sent_length
-                progressed = True
+                try:
+                    sent_length = connection.send(
+                        memoryview(payload)[sent_offset:]
+                    )
+                    if sent_length == 0:
+                        raise ConnectionError("connection closed while sending")
+                    sent_offset += sent_length
+                    progressed = True
+                except (ssl.SSLWantReadError, ssl.SSLWantWriteError):
+                    pass
 
             if readable:
-                chunk = connection.recv(min(4096, len(payload) - len(received)))
-                if not chunk:
-                    break
-                received.extend(chunk)
-                progressed = True
+                try:
+                    chunk = connection.recv(
+                        min(4096, len(payload) - len(received))
+                    )
+                    if not chunk:
+                        break
+                    received.extend(chunk)
+                    progressed = True
+                except (ssl.SSLWantReadError, ssl.SSLWantWriteError):
+                    pass
 
             if progressed:
                 deadline = time.monotonic() + timeout
-
-        if not write_closed:
-            connection.shutdown(socket.SHUT_WR)
 
     return bytes(received)
 
@@ -132,7 +152,7 @@ def verify_case(
 
 def verify_rejected(host: str, port: int, timeout: float) -> None:
     """Confirm that an invalid token is rejected and not echoed."""
-    with socket.create_connection((host, port), timeout=timeout) as connection:
+    with create_tls_connection(host, port, timeout) as connection:
         connection.sendall(b"AUTH definitely-invalid-token\r\n")
         response = receive_exact(connection, len(AUTH_FAILED))
 
@@ -149,7 +169,7 @@ def verify_auth_stream_handling(
     payload = b"combined-auth-and-data\r\n"
     auth_line = f"AUTH {token}\r\n".encode("utf-8")
 
-    with socket.create_connection((host, port), timeout=timeout) as connection:
+    with create_tls_connection(host, port, timeout) as connection:
         split_at = max(1, len(auth_line) // 2)
         connection.sendall(auth_line[:split_at])
         time.sleep(0.05)
@@ -158,7 +178,7 @@ def verify_auth_stream_handling(
         if response != AUTH_OK:
             raise RuntimeError(f"split authentication failed: {response!r}")
 
-    with socket.create_connection((host, port), timeout=timeout) as connection:
+    with create_tls_connection(host, port, timeout) as connection:
         connection.sendall(auth_line + payload)
         response = receive_exact(connection, len(AUTH_OK) + len(payload))
         expected = AUTH_OK + payload
@@ -173,7 +193,7 @@ def verify_auth_stream_handling(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Test an STM32/lwIP TCP Echo server."
+        description="Test an STM32/lwIP MbedTLS Echo server."
     )
     parser.add_argument("--host", default=DEFAULT_HOST, help="server IPv4 address")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="TCP port")
